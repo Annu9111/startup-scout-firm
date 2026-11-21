@@ -5,10 +5,9 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from pipeline import find_startups, check_company, scrape_site, write_brief
+from db import save_job, load_job, list_jobs
 
 app = FastAPI(title="Startup Scout Firm")
-
-JOBS = {}  # in memory for now; we move this to a database later
 
 
 class JobRequest(BaseModel):
@@ -24,13 +23,16 @@ class Decision(BaseModel):
 
 
 def run_job(job_id: str, req: JobRequest):
-    job = JOBS[job_id]
+    job = load_job(job_id)
     started = time.time()
     try:
         job["status"] = "running"
         job["log"].append("Finding startups")
+        save_job(job)
+
         companies = find_startups(req.limit, req.rounds, req.since)
         job["log"].append(f"Found {len(companies)} companies")
+        save_job(job)
 
         for c in companies:
             name = (c.get("basic_info") or {}).get("name")
@@ -38,9 +40,11 @@ def run_job(job_id: str, req: JobRequest):
             if not ok:
                 job["skipped"].append({"name": name, "reason": reason})
                 job["log"].append(f"Skipped {name}: {reason}")
+                save_job(job)
                 continue
 
             job["log"].append(f"Researching {name}")
+            save_job(job)
             domain = c["basic_info"]["primary_domain"]
             site_text = scrape_site(domain)
             brief = write_brief(c, site_text)
@@ -52,6 +56,7 @@ def run_job(job_id: str, req: JobRequest):
                 "brief": brief,
                 "status": "needs_human_review",
             })
+            save_job(job)
             time.sleep(2)
 
         job["status"] = "awaiting_review"
@@ -60,6 +65,7 @@ def run_job(job_id: str, req: JobRequest):
         job["error"] = str(e)
     finally:
         job["seconds_taken"] = round(time.time() - started, 1)
+        save_job(job)
 
 
 @app.get("/")
@@ -70,7 +76,7 @@ def health():
 @app.post("/jobs")
 def create_job(req: JobRequest, background: BackgroundTasks):
     job_id = uuid.uuid4().hex[:8]
-    JOBS[job_id] = {
+    job = {
         "id": job_id,
         "customer": req.customer,
         "status": "queued",
@@ -78,22 +84,35 @@ def create_job(req: JobRequest, background: BackgroundTasks):
         "briefs": [],
         "skipped": [],
     }
+    save_job(job)
     background.add_task(run_job, job_id, req)
     return {"job_id": job_id, "status": "queued"}
 
 
+@app.get("/jobs")
+def all_jobs():
+    return [
+        {"id": j["id"], "customer": j["customer"], "status": j["status"],
+         "briefs": len(j["briefs"])}
+        for j in list_jobs()
+    ]
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
-    if job_id not in JOBS:
+    job = load_job(job_id)
+    if not job:
         raise HTTPException(404, "Job not found")
-    return JOBS[job_id]
+    return job
 
 
 @app.post("/jobs/{job_id}/briefs/{index}/decision")
 def decide(job_id: str, index: int, decision: Decision):
-    job = JOBS.get(job_id)
+    job = load_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    if job["status"] in ("queued", "running"):
+        raise HTTPException(409, "Job is still running. Wait for awaiting_review.")
     if index < 0 or index >= len(job["briefs"]):
         raise HTTPException(404, "Brief not found")
     if decision.action not in ("approve", "reject"):
@@ -106,12 +125,13 @@ def decide(job_id: str, index: int, decision: Decision):
 
     if all(b["status"] != "needs_human_review" for b in job["briefs"]):
         job["status"] = "completed"
+    save_job(job)
     return item
 
 
 @app.get("/jobs/{job_id}/report")
 def report(job_id: str):
-    job = JOBS.get(job_id)
+    job = load_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     pending = [b for b in job["briefs"] if b["status"] == "needs_human_review"]
