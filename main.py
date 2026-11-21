@@ -1,13 +1,18 @@
 import uuid
 import time
+from pathlib import Path
 from typing import Optional
+
 from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from pipeline import find_startups, check_company, scrape_site, write_brief
 from db import save_job, load_job, list_jobs
 
 app = FastAPI(title="Startup Scout Firm")
+
+BASE_DIR = Path(__file__).parent
 
 
 class JobRequest(BaseModel):
@@ -68,9 +73,14 @@ def run_job(job_id: str, req: JobRequest):
         save_job(job)
 
 
-@app.get("/")
+@app.get("/health")
 def health():
     return {"service": "Startup Scout Firm", "status": "ok"}
+
+
+@app.get("/")
+def home():
+    return FileResponse(BASE_DIR / "static" / "index.html")
 
 
 @app.post("/jobs")
@@ -92,8 +102,12 @@ def create_job(req: JobRequest, background: BackgroundTasks):
 @app.get("/jobs")
 def all_jobs():
     return [
-        {"id": j["id"], "customer": j["customer"], "status": j["status"],
-         "briefs": len(j["briefs"])}
+        {
+            "id": j["id"],
+            "customer": j["customer"],
+            "status": j["status"],
+            "briefs": len(j["briefs"]),
+        }
         for j in list_jobs()
     ]
 
