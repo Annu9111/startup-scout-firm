@@ -1,0 +1,59 @@
+{
+  "seconds_taken": 87.2,
+  "briefs": [
+    {
+      "name": "VitusCare",
+      "website": "vituscare.com",
+      "funding": {
+        "last_round_amount_usd": 3217189.0,
+        "last_fundraise_date": "2026-11-19",
+        "last_round_type": "series_b"
+      },
+      "headcount": 72,
+      "brief": "VitusCare is India's leading dialysis care provider, offering accessible and affordable kidney care in Tier 2, 3, and 4 cities with over 50 operational centers. The company is currently at a Series B stage, having raised $3,217,189 on November 19, 2026. It focuses on improving the quality of life through a World Class Dialysis Management Program for individuals and their families. A notable detail is its projection to achieve Rs 100 Cr ARR by 2026.",
+      "status": "needs_human_review"
+    },
+    {
+      "name": "Elysian Aircraft",
+      "website": "elysianaircraft.com",
+      "funding": {
+        "last_round_amount_usd": 6582520.0,
+        "last_fundraise_date": "2026-11-19",
+        "last_round_type": "seed"
+      },
+      "headcount": 36,
+      "brief": "Elysian Aircraft is developing the E9X, an 88-100 seat battery-electric aircraft, and core technologies to enable aviation's transition to electric flight. The E9X is designed to replace 50% of all scheduled flights on routes up to 1,000 km, targeting a 20% reduction in global aviation emissions. The company recently closed a $6,582,520 Pre-Series A funding round on November 19, 2026. Notably, they are backed by a strong patent portfolio and deep industry partnerships with Fokker Services Group, KLM, and Transavia.",
+      "status": "needs_human_review"
+    },
+    {
+      "name": "Boba Bhai",
+      "website": "bobabhai.com",
+      "funding": {
+        "last_round_amount_usd": 18000000.0,
+        "last_fundraise_date": "2026-11-19",
+        "last_round_type": "series_b"
+      },
+      "headcount": 202,
+      "brief": "Boba Bhai is India's premier Korean-Indian fusion street food brand, established in 2023, offering 45+ bubble teas alongside dishes like corn dogs and ramen. It recently closed a Series B funding round, raising $18 million on November 19, 2026, and operates with a team of 202. The company has rapidly expanded to over 120 stores across India, fulfilling 300,000+ orders monthly across dine-in, takeaway, and delivery. A notable detail is its significant market reach, with packaged bubble tea now available in over 70 cities through quick commerce.",
+      "status": "needs_human_review"
+    },
+    {
+      "name": "INFIFORCE Technology Group",
+      "website": "elu-ai.com",
+      "funding": {
+        "last_round_amount_usd": 14996551.0,
+        "last_fundraise_date": "2026-11-19",
+        "last_round_type": "series_a"
+      },
+      "headcount": 13,
+      "brief": "INFIFORCE Technology Group is a leading embodied AI company focused on developing next-generation AI brains for the physical world, notably AtomBrain, which enables robots to learn from real-world experience. They also offer DataGrid, a full-stack AI infrastructure, and multi-form-factor robotic platforms, forming an end-to-end technology ecosystem. The company is at the Series A stage, having raised approximately $15 million in November 2026. Notably, their technologies have been deployed across 30+ cities and 100+ real-world scenarios, demonstrating scalability and practical value.",
+      "status": "needs_human_review"
+    }
+  ],
+  "skipped": [
+    {
+      "name": "METAPYXL",
+      "reason": "funding date is in the future (2026-12-01)"
+    }
+  ]
+}
