@@ -7,7 +7,7 @@ from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from pipeline import find_startups, check_company, scrape_site, write_brief
+from pipeline import find_startups, check_company, scrape_site, write_brief, review_brief
 from db import save_job, load_job, list_jobs
 
 app = FastAPI(title="Startup Scout Firm")
@@ -53,12 +53,18 @@ def run_job(job_id: str, req: JobRequest):
             domain = c["basic_info"]["primary_domain"]
             site_text = scrape_site(domain)
             brief = write_brief(c, site_text)
+
+            job["log"].append(f"Fact-checking {name}")
+            save_job(job)
+            review = review_brief(c, site_text, brief)
+
             job["briefs"].append({
                 "name": name,
                 "website": domain,
                 "funding": c.get("funding"),
                 "headcount": (c.get("headcount") or {}).get("total"),
                 "brief": brief,
+                "review": review,
                 "status": "needs_human_review",
             })
             save_job(job)
