@@ -110,6 +110,14 @@
   .skipped { background: var(--amber-bg); color: var(--amber); border-radius: 10px; padding: 12px 16px; margin-bottom: 18px; font-size: 14px; }
   .skipped p { margin: 0; }
 
+  .review { border-radius: 10px; padding: 12px 16px; margin: 0 0 12px; font-size: 14px; }
+  .review strong { display: block; margin-bottom: 2px; }
+  .review ul { margin: 8px 0 0; padding-left: 18px; }
+  .review li { margin-bottom: 6px; }
+  .review.flag { background: var(--amber-bg); color: #6b3d05; border: 1px solid #ecc88a; }
+  .review.clear { background: var(--green-bg); color: var(--green); }
+  .review.muted { background: #eceff4; color: var(--muted); }
+
   .report { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 32px clamp(20px, 4vw, 44px); margin-top: 28px; }
   .report h2 { font-family: var(--serif); font-size: 32px; margin: 0 0 4px; font-weight: 600; }
   .report .summary { color: var(--muted); margin: 0 0 22px; }
@@ -304,6 +312,31 @@ function render(job) {
   if (job.status === "completed") showReport();
 }
 
+function reviewBox(r) {
+  if (!r) return null;
+  if (r.verdict === "not_checked") {
+    return h("div", { class: "review muted" }, [
+      h("strong", { text: "Fact-check unavailable" }),
+      "Please check this brief against the company website yourself.",
+    ]);
+  }
+  const flags = r.flags || [];
+  if (!flags.length) {
+    return h("div", { class: "review clear" }, [
+      h("strong", { text: "Fact-check passed" }),
+      "No unsupported claims were found in this brief.",
+    ]);
+  }
+  const items = flags.map((f) => h("li", {}, [
+    h("em", { text: "\u201c" + String(f.claim) + "\u201d" }),
+    " " + String(f.reason || ""),
+  ]));
+  return h("div", { class: "review flag" }, [
+    h("strong", { text: "Check before approving: " + flags.length + (flags.length === 1 ? " claim is" : " claims are") + " not backed by the data" }),
+    h("ul", {}, items),
+  ]);
+}
+
 function briefCard(b, i) {
   const f = b.funding || {};
   const decided = b.status !== "needs_human_review";
@@ -329,6 +362,8 @@ function briefCard(b, i) {
     ]),
     facts, area,
   ];
+  const rv = reviewBox(b.review);
+  if (rv) kids.splice(2, 0, rv);
   if (!decided) {
     kids.push(h("p", { class: "hint", text: "AI drafts can repeat claims from a company's own website. Check the facts and edit the text before you approve." }));
     kids.push(h("div", { class: "actions" }, [approve, reject]));
