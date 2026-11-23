@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from pipeline import find_startups, check_company, scrape_site, write_brief, review_brief
 from db import save_job, load_job, list_jobs
+from business import job_economics
 
 app = FastAPI(title="Startup Scout Firm")
 
@@ -29,6 +30,7 @@ class Decision(BaseModel):
 
 def run_job(job_id: str, req: JobRequest):
     job = load_job(job_id)
+    usage = job.setdefault("usage", {})
     started = time.time()
     try:
         job["status"] = "running"
@@ -36,6 +38,7 @@ def run_job(job_id: str, req: JobRequest):
         save_job(job)
 
         companies = find_startups(req.limit, req.rounds, req.since)
+        usage["companies_found"] = len(companies)
         job["log"].append(f"Found {len(companies)} companies")
         save_job(job)
 
@@ -51,12 +54,12 @@ def run_job(job_id: str, req: JobRequest):
             job["log"].append(f"Researching {name}")
             save_job(job)
             domain = c["basic_info"]["primary_domain"]
-            site_text = scrape_site(domain)
-            brief = write_brief(c, site_text)
+            site_text = scrape_site(domain, usage)
+            brief = write_brief(c, site_text, usage)
 
             job["log"].append(f"Fact-checking {name}")
             save_job(job)
-            review = review_brief(c, site_text, brief)
+            review = review_brief(c, site_text, brief, usage)
 
             job["briefs"].append({
                 "name": name,
@@ -99,6 +102,7 @@ def create_job(req: JobRequest, background: BackgroundTasks):
         "log": [],
         "briefs": [],
         "skipped": [],
+        "usage": {},
     }
     save_job(job)
     background.add_task(run_job, job_id, req)
@@ -163,4 +167,5 @@ def report(job_id: str):
         "rejected_count": sum(1 for b in job["briefs"] if b["status"] == "rejected"),
         "skipped": job["skipped"],
         "seconds_taken": job.get("seconds_taken"),
+        "economics": job_economics(job),
     }
