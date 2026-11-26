@@ -128,7 +128,10 @@ def write_brief(company, website_text, usage=None):
             r = httpx.post(
                 url,
                 headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
-                json={"contents": [{"parts": [{"text": prompt}]}]},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"thinkingConfig": {"thinkingBudget": 0}},
+                },
                 timeout=120,
             )
             if r.status_code == 200:
@@ -170,7 +173,10 @@ def review_brief(company, website_text, brief, usage=None):
                 headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"responseMimeType": "application/json"},
+                    "generationConfig": {
+                        "responseMimeType": "application/json",
+                        "thinkingConfig": {"thinkingBudget": 0},
+                    },
                 },
                 timeout=120,
             )
