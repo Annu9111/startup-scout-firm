@@ -1,5 +1,6 @@
 import uuid
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,7 @@ from business import job_economics
 app = FastAPI(title="Startup Scout Firm")
 
 BASE_DIR = Path(__file__).parent
+MAX_PARALLEL = 3  # companies researched at the same time
 
 
 class JobRequest(BaseModel):
@@ -28,6 +30,40 @@ class Decision(BaseModel):
     edited_brief: Optional[str] = None
 
 
+def process_company(c):
+    """Research one company. Runs in a worker thread and never touches the job record."""
+    usage = {}
+    name = (c.get("basic_info") or {}).get("name")
+    try:
+        ok, reason = check_company(c)
+        if not ok:
+            return {"skipped": {"name": name, "reason": reason}, "usage": usage}
+
+        domain = c["basic_info"]["primary_domain"]
+        site_text = scrape_site(domain, usage)
+        brief = write_brief(c, site_text, usage)
+        review = review_brief(c, site_text, brief, usage)
+        return {
+            "brief": {
+                "name": name,
+                "website": domain,
+                "funding": c.get("funding"),
+                "headcount": (c.get("headcount") or {}).get("total"),
+                "brief": brief,
+                "review": review,
+                "status": "needs_human_review",
+            },
+            "usage": usage,
+        }
+    except Exception as e:
+        return {"skipped": {"name": name, "reason": f"processing error ({e})"}, "usage": usage}
+
+
+def merge_usage(total, part):
+    for key, value in part.items():
+        total[key] = total.get(key, 0) + value
+
+
 def run_job(job_id: str, req: JobRequest):
     job = load_job(job_id)
     usage = job.setdefault("usage", {})
@@ -40,38 +76,22 @@ def run_job(job_id: str, req: JobRequest):
         companies = find_startups(req.limit, req.rounds, req.since)
         usage["companies_found"] = len(companies)
         job["log"].append(f"Found {len(companies)} companies")
+        job["log"].append(f"Researching {len(companies)} startups at the same time")
         save_job(job)
 
-        for c in companies:
-            name = (c.get("basic_info") or {}).get("name")
-            ok, reason = check_company(c)
-            if not ok:
-                job["skipped"].append({"name": name, "reason": reason})
-                job["log"].append(f"Skipped {name}: {reason}")
+        with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
+            futures = [pool.submit(process_company, c) for c in companies]
+            for fut in futures:  # collected in the original order
+                result = fut.result()
+                merge_usage(usage, result["usage"])
+                if "skipped" in result:
+                    s = result["skipped"]
+                    job["skipped"].append(s)
+                    job["log"].append(f"Skipped {s['name']}: {s['reason']}")
+                else:
+                    job["briefs"].append(result["brief"])
+                    job["log"].append(f"Finished {result['brief']['name']}")
                 save_job(job)
-                continue
-
-            job["log"].append(f"Researching {name}")
-            save_job(job)
-            domain = c["basic_info"]["primary_domain"]
-            site_text = scrape_site(domain, usage)
-            brief = write_brief(c, site_text, usage)
-
-            job["log"].append(f"Fact-checking {name}")
-            save_job(job)
-            review = review_brief(c, site_text, brief, usage)
-
-            job["briefs"].append({
-                "name": name,
-                "website": domain,
-                "funding": c.get("funding"),
-                "headcount": (c.get("headcount") or {}).get("total"),
-                "brief": brief,
-                "review": review,
-                "status": "needs_human_review",
-            })
-            save_job(job)
-            time.sleep(2)
 
         job["status"] = "awaiting_review"
     except Exception as e:
