@@ -127,6 +127,16 @@
   .report article .meta { font-size: 13px; color: var(--muted); margin: 0; }
   .report .actions { margin-top: 20px; }
 
+  .econ { background: var(--paper); border-radius: 12px; padding: 18px 20px; margin: 0 0 22px; }
+  .econ h3 { font-family: var(--serif); font-size: 20px; margin: 0 0 12px; font-weight: 600; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat .label { font-size: 13px; color: var(--muted); }
+  .stat .value { font-family: var(--serif); font-size: 26px; font-weight: 600; line-height: 1.2; margin: 2px 0; }
+  .stat .sub { font-size: 12px; color: var(--muted); }
+  .econ .note { font-size: 13px; color: var(--muted); margin: 12px 0 0; }
+  @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
   @media (max-width: 900px) {
     .layout { grid-template-columns: 1fr; }
     aside { position: static; height: auto; }
@@ -351,6 +361,10 @@ function briefCard(b, i) {
     h("span", { class: "fact", text: b.headcount != null ? b.headcount + " people" : "Team size not listed" }),
   ]);
   const area = h("textarea", { "aria-label": "Brief for " + b.name, disabled: decided }, [b.brief]);
+  const fit = () => { area.style.height = "auto"; area.style.height = area.scrollHeight + 2 + "px"; };
+  requestAnimationFrame(fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  area.addEventListener("input", fit);
   const approve = h("button", { class: "btn approve", type: "button", disabled: decided, text: "Approve brief",
     onclick: () => decide(i, "approve", area.value, b.brief) });
   const reject = h("button", { class: "btn reject", type: "button", disabled: decided, text: "Reject brief",
@@ -425,6 +439,43 @@ async function decide(index, action, text, original) {
   }
 }
 
+function usd(n) {
+  const v = Number(n) || 0;
+  return "$" + (Math.abs(v) < 1 && v !== 0 ? v.toFixed(3) : v.toFixed(2));
+}
+function duration(totalSeconds) {
+  const s = Math.round(Number(totalSeconds) || 0);
+  if (s < 60) return s + " sec";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + " min " + (s % 60) + " sec";
+  return Math.floor(m / 60) + " h " + (m % 60) + " min";
+}
+function stat(label, value, sub) {
+  return h("div", { class: "stat" }, [
+    h("div", { class: "label", text: label }),
+    h("div", { class: "value", text: value }),
+    h("div", { class: "sub", text: sub }),
+  ]);
+}
+function economicsPanel(e) {
+  if (!e) return null;
+  const a = e.assumptions || {};
+  const pct = e.margin_pct == null ? "" : e.margin_pct + "% margin";
+  return h("div", { class: "econ" }, [
+    h("h3", { text: "What this job cost, and what it replaced" }),
+    h("div", { class: "stats" }, [
+      stat("Price to customer", usd(e.revenue), e.approved + " approved at " + usd(a.price_per_brief)),
+      stat("Our cost to produce", usd(e.our_cost), "Data, web reads and AI"),
+      stat("Our margin", usd(e.margin), pct),
+      stat("Agent time", duration(e.agent_seconds), "A human analyst: about " + duration(e.human_minutes * 60)),
+    ]),
+    h("p", { class: "note", text:
+      "A human analyst would cost about " + usd(e.human_cost) + " for the same " + e.researched +
+      " companies (" + a.analyst_minutes + " minutes each at " + usd(a.analyst_rate) + " per hour). " +
+      "Agent time is before the human review. Prices and the analyst rate are stated assumptions; our cost uses measured usage." }),
+  ]);
+}
+
 async function showReport() {
   const rep = await api("/jobs/" + jobId + "/report");
   const box = $("report");
@@ -433,6 +484,8 @@ async function showReport() {
     h("h2", { text: "Funding research for " + rep.customer }),
     h("p", { class: "summary", text: `${rep.approved.length} approved, ${rep.rejected_count} rejected, ${rep.skipped.length} left out by data checks.` }),
   ];
+  const eco = economicsPanel(rep.economics);
+  if (eco) kids.push(eco);
   rep.approved.forEach((b) => {
     const f = b.funding || {};
     kids.push(h("article", {}, [
