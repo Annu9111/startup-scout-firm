@@ -42,7 +42,7 @@
   form { display: flex; flex-direction: column; gap: 18px; }
   .field > span, fieldset legend { display: block; font-size: 14px; font-weight: 500; color: #cfd6e6; margin-bottom: 6px; padding: 0; }
   fieldset { border: 0; padding: 0; margin: 0; }
-  input[type=text], input[type=date], input[type=number] {
+  input[type=text], input[type=date], input[type=number], input[type=password] {
     width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #34456b; background: var(--ink-2); color: #fff; font: inherit;
   }
   input[type=date] { color-scheme: dark; }
@@ -184,6 +184,10 @@
 
       <label class="field"><span>How many startups (1 to 10)</span>
         <input type="number" id="limit" value="3" min="1" max="10">
+      </label>
+
+      <label class="field"><span>Access code</span>
+        <input type="password" id="code" placeholder="Needed on the live site" autocomplete="off">
       </label>
 
       <button type="submit" class="primary" id="startBtn">Start research</button>
@@ -358,7 +362,7 @@ function briefCard(b, i) {
     h("span", { class: "fact", text: stageName(f.last_round_type) }),
     h("span", { class: "fact", text: money(f.last_round_amount_usd) }),
     h("span", { class: "fact", text: f.last_fundraise_date ? "Funded " + f.last_fundraise_date : "Date not listed" }),
-    h("span", { class: "fact", text: b.headcount != null ? b.headcount + " people" : "Team size not listed" }),
+    h("span", { class: "fact", text: b.headcount != null ? b.headcount + (b.headcount === 1 ? " person" : " people") : "Team size not listed" }),
   ]);
   const area = h("textarea", { "aria-label": "Brief for " + b.name, disabled: decided }, [b.brief]);
   const fit = () => { area.style.height = "auto"; area.style.height = area.scrollHeight + 2 + "px"; };
@@ -378,6 +382,12 @@ function briefCard(b, i) {
   ];
   const rv = reviewBox(b.review);
   if (rv) kids.splice(2, 0, rv);
+  if (b.site_read === false) {
+    kids.splice(2, 0, h("div", { class: "review flag" }, [
+      h("strong", { text: "Website could not be read" }),
+      "This brief uses database information only. Check the company's site before approving.",
+    ]));
+  }
   if (!decided) {
     kids.push(h("p", { class: "hint", text: "AI drafts can repeat claims from a company's own website. Check the facts and edit the text before you approve." }));
     kids.push(h("div", { class: "actions" }, [approve, reject]));
@@ -386,6 +396,15 @@ function briefCard(b, i) {
 }
 
 /* ---------- actions ---------- */
+function accessCode() {
+  const typed = $("code").value.trim();
+  if (typed) {
+    try { sessionStorage.setItem("scoutCode", typed); } catch (_) {}
+    return typed;
+  }
+  try { return sessionStorage.getItem("scoutCode") || ""; } catch (_) { return ""; }
+}
+
 async function startJob(e) {
   e.preventDefault();
   $("formError").textContent = "";
@@ -397,7 +416,7 @@ async function startJob(e) {
   try {
     const res = await api("/jobs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Access-Code": accessCode() },
       body: JSON.stringify({ customer: $("customer").value.trim() || "Customer", rounds, since: $("since").value, limit }),
     });
     jobId = res.job_id;
@@ -430,7 +449,7 @@ async function decide(index, action, text, original) {
   try {
     await api(`/jobs/${jobId}/briefs/${index}/decision`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Access-Code": accessCode() },
       body: JSON.stringify(body),
     });
     poll();

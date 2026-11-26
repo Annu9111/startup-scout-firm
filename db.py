@@ -40,3 +40,13 @@ def list_jobs():
         "SELECT data FROM jobs ORDER BY updated_at DESC LIMIT 50", fetch=True
     )
     return [json.loads(r[0]) for r in rows]
+
+
+def count_jobs_on(date_str: str) -> int:
+    """How many jobs were created on this UTC date (used for the daily limit)."""
+    rows = _run(
+        "SELECT COUNT(*) FROM jobs WHERE json_extract(data, '$.created_date') = ?",
+        (date_str,),
+        fetch=True,
+    )
+    return rows[0][0] if rows else 0

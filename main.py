@@ -1,26 +1,47 @@
-import uuid
+import datetime
+import hmac
+import os
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from dotenv import load_dotenv
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from pipeline import find_startups, check_company, scrape_site, write_brief, review_brief
-from db import save_job, load_job, list_jobs
+from db import save_job, load_job, list_jobs, count_jobs_on
 from business import job_economics
+
+load_dotenv()
 
 app = FastAPI(title="Startup Scout Firm")
 
 BASE_DIR = Path(__file__).parent
-MAX_PARALLEL = 3  # companies researched at the same time
-CANDIDATE_FACTOR = 3  # fetch this many times more candidates than requested
+MAX_PARALLEL = 3          # companies researched at the same time
+CANDIDATE_FACTOR = 3      # fetch this many times more candidates than requested
+
+# Protection for the public link. Set both in .env locally and in Render's environment.
+ACCESS_CODE = os.getenv("ACCESS_CODE", "")                  # empty = open (local development)
+DAILY_JOB_LIMIT = int(os.getenv("DAILY_JOB_LIMIT", "20"))   # new jobs allowed per day (UTC)
+
+
+def require_code(x_access_code: str = Header(default="")):
+    if not ACCESS_CODE:
+        return
+    if not hmac.compare_digest(x_access_code.encode("utf-8"), ACCESS_CODE.encode("utf-8")):
+        raise HTTPException(401, "Wrong or missing access code.")
+
+
+def utc_today() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).date().isoformat()
 
 
 class JobRequest(BaseModel):
-    customer: str = "demo customer"
+    customer: str = Field(default="demo customer", max_length=80)
     rounds: list[str] = Field(default=["seed", "series_a", "series_b"])
     since: str = "2026-09-01"
     limit: int = Field(default=3, ge=1, le=10)
@@ -28,7 +49,7 @@ class JobRequest(BaseModel):
 
 class Decision(BaseModel):
     action: str  # "approve" or "reject"
-    edited_brief: Optional[str] = None
+    edited_brief: Optional[str] = Field(default=None, max_length=4000)
 
 
 def process_company(c):
@@ -52,6 +73,7 @@ def process_company(c):
                 "headcount": (c.get("headcount") or {}).get("total"),
                 "brief": brief,
                 "review": review,
+                "site_read": bool(site_text),
                 "status": "needs_human_review",
             },
             "usage": usage,
@@ -123,7 +145,11 @@ def run_job(job_id: str, req: JobRequest):
 
 @app.get("/health")
 def health():
-    return {"service": "Startup Scout Firm", "status": "ok"}
+    return {
+        "service": "Startup Scout Firm",
+        "status": "ok",
+        "access_code_required": bool(ACCESS_CODE),
+    }
 
 
 @app.get("/")
@@ -132,11 +158,16 @@ def home():
 
 
 @app.post("/jobs")
-def create_job(req: JobRequest, background: BackgroundTasks):
+def create_job(req: JobRequest, background: BackgroundTasks, _: None = Depends(require_code)):
+    today = utc_today()
+    if count_jobs_on(today) >= DAILY_JOB_LIMIT:
+        raise HTTPException(429, "The daily job limit has been reached. Please try again tomorrow.")
+
     job_id = uuid.uuid4().hex[:8]
     job = {
         "id": job_id,
         "customer": req.customer,
+        "created_date": today,
         "status": "queued",
         "log": [],
         "briefs": [],
@@ -170,7 +201,7 @@ def get_job(job_id: str):
 
 
 @app.post("/jobs/{job_id}/briefs/{index}/decision")
-def decide(job_id: str, index: int, decision: Decision):
+def decide(job_id: str, index: int, decision: Decision, _: None = Depends(require_code)):
     job = load_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")

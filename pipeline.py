@@ -75,26 +75,30 @@ def check_company(company):
     return True, "ok"
 
 
-# ---------- Stage 3: read the website (Olostep) ----------
+# ---------- Stage 3: read the website (Olostep), with one retry ----------
 def scrape_site(domain, usage=None):
-    try:
-        r = httpx.post(
-            "https://api.olostep.com/v1/scrapes",
-            headers={
-                "Authorization": f"Bearer {OLOSTEP_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={"url_to_scrape": f"https://{domain}", "formats": ["markdown"]},
-            timeout=90,
-        )
-        r.raise_for_status()
-        if usage is not None:
-            usage["scrapes"] = usage.get("scrapes", 0) + 1
-        text = (r.json().get("result") or {}).get("markdown_content") or ""
-        return text[:4000]
-    except Exception as e:
-        print("   scrape failed:", e)
-        return ""
+    for attempt in range(2):
+        try:
+            r = httpx.post(
+                "https://api.olostep.com/v1/scrapes",
+                headers={
+                    "Authorization": f"Bearer {OLOSTEP_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={"url_to_scrape": f"https://{domain}", "formats": ["markdown"]},
+                timeout=90,
+            )
+            r.raise_for_status()
+            if usage is not None:
+                usage["scrapes"] = usage.get("scrapes", 0) + 1
+            text = (r.json().get("result") or {}).get("markdown_content") or ""
+            if text.strip():
+                return text[:4000]
+            print(f"   scrape of {domain} returned no text, retrying...")
+        except Exception as e:
+            print(f"   scrape of {domain} failed: {e}")
+        time.sleep(2)
+    return ""
 
 
 # ---------- Stage 4: write the brief (Gemini) ----------
@@ -200,58 +204,3 @@ def review_brief(company, website_text, brief, usage=None):
             print("   reviewer problem:", e)
         time.sleep(5)
     return {"verdict": "not_checked", "flags": []}
-
-
-# ---------- Optional: run the pipeline from the terminal (python pipeline.py) ----------
-def run_job():
-    started = time.time()
-    usage = {}
-    results, skipped = [], []
-
-    print("Finding startups...")
-    companies = find_startups(limit=3)
-    print(f"Found {len(companies)} companies\n")
-
-    for c in companies:
-        name = (c.get("basic_info") or {}).get("name")
-        ok, reason = check_company(c)
-        if not ok:
-            print(f"SKIP {name}: {reason}")
-            skipped.append({"name": name, "reason": reason})
-            continue
-
-        print(f"WORK {name}")
-        domain = c["basic_info"]["primary_domain"]
-        site_text = scrape_site(domain, usage)
-        brief = write_brief(c, site_text, usage)
-        review = review_brief(c, site_text, brief, usage)
-        results.append({
-            "name": name,
-            "website": domain,
-            "funding": c.get("funding"),
-            "headcount": (c.get("headcount") or {}).get("total"),
-            "brief": brief,
-            "review": review,
-            "status": "needs_human_review",
-        })
-        time.sleep(2)  # be gentle with the free Gemini tier
-
-    report = {
-        "seconds_taken": round(time.time() - started, 1),
-        "usage": usage,
-        "briefs": results,
-        "skipped": skipped,
-    }
-    with open("output.json", "w") as f:
-        json.dump(report, f, indent=2)
-
-    print("\n===== REPORT =====")
-    for item in results:
-        print(f"\n{item['name']} ({item['website']})\n{item['brief']}")
-        for flag in item["review"]["flags"]:
-            print(f"   CHECK: {flag['claim']} -> {flag['reason']}")
-    print(f"\nDone in {report['seconds_taken']}s. Usage: {usage}")
-
-
-if __name__ == "__main__":
-    run_job()
