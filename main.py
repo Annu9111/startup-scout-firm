@@ -16,6 +16,7 @@ app = FastAPI(title="Startup Scout Firm")
 
 BASE_DIR = Path(__file__).parent
 MAX_PARALLEL = 3  # companies researched at the same time
+CANDIDATE_FACTOR = 3  # fetch this many times more candidates than requested
 
 
 class JobRequest(BaseModel):
@@ -73,14 +74,32 @@ def run_job(job_id: str, req: JobRequest):
         job["log"].append("Finding startups")
         save_job(job)
 
-        companies = find_startups(req.limit, req.rounds, req.since)
-        usage["companies_found"] = len(companies)
-        job["log"].append(f"Found {len(companies)} companies")
-        job["log"].append(f"Researching {len(companies)} startups at the same time")
+        # Ask for extra candidates, because some records fail the data check.
+        fetch = min(req.limit * CANDIDATE_FACTOR, 30)
+        candidates = find_startups(fetch, req.rounds, req.since)
+        usage["companies_found"] = len(candidates)
+
+        valid = []
+        for c in candidates:
+            if len(valid) >= req.limit:
+                break
+            ok, reason = check_company(c)
+            if ok:
+                valid.append(c)
+            else:
+                name = (c.get("basic_info") or {}).get("name")
+                job["skipped"].append({"name": name, "reason": reason})
+                job["log"].append(f"Skipped {name}: {reason}")
+
+        job["log"].append(
+            f"Found {len(candidates)} candidates, {len(valid)} passed the data check"
+        )
+        if valid:
+            job["log"].append(f"Researching {len(valid)} startups at the same time")
         save_job(job)
 
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
-            futures = [pool.submit(process_company, c) for c in companies]
+            futures = [pool.submit(process_company, c) for c in valid]
             for fut in futures:  # collected in the original order
                 result = fut.result()
                 merge_usage(usage, result["usage"])
@@ -93,7 +112,7 @@ def run_job(job_id: str, req: JobRequest):
                     job["log"].append(f"Finished {result['brief']['name']}")
                 save_job(job)
 
-        job["status"] = "awaiting_review"
+        job["status"] = "awaiting_review" if job["briefs"] else "completed"
     except Exception as e:
         job["status"] = "failed"
         job["error"] = str(e)
