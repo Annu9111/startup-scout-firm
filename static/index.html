@@ -56,6 +56,8 @@
   .primary:hover { background: var(--accent-dark); }
   .primary:disabled { opacity: .55; cursor: not-allowed; }
   .form-error { color: #ffb4ab; font-size: 14px; min-height: 1.2em; margin: 0; }
+  .ghost { width: 100%; background: transparent; color: #cfd6e6; border: 1px solid #34456b; border-radius: 8px; padding: 11px 16px; font: inherit; font-weight: 500; cursor: pointer; }
+  .ghost:hover { background: var(--ink-2); color: #fff; }
   .credits { margin-top: auto; font-size: 13px; color: #8996b3; }
 
   /* ---------- desk ---------- */
@@ -193,6 +195,11 @@
       <button type="submit" class="primary" id="startBtn">Start research</button>
       <p class="form-error" id="formError" role="alert"></p>
     </form>
+
+    <div>
+      <button type="button" class="ghost" id="exampleBtn">See a finished example report</button>
+      <p class="form-error" id="exampleError" role="alert"></p>
+    </div>
 
     <p class="credits">Company data from Crustdata. Websites read with Olostep. Briefs drafted by Gemini.</p>
   </aside>
@@ -370,7 +377,19 @@ function briefCard(b, i) {
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
   area.addEventListener("input", fit);
   const approve = h("button", { class: "btn approve", type: "button", disabled: decided, text: "Approve brief",
-    onclick: () => decide(i, "approve", area.value, b.brief) });
+    onclick: () => {
+      const flagged = (b.review && b.review.flags ? b.review.flags.length : 0);
+      const unread = b.site_read === false;
+      if (flagged || unread) {
+        const parts = [];
+        if (flagged) parts.push(flagged + (flagged === 1 ? " claim is" : " claims are") + " flagged as not backed by the data");
+        if (unread) parts.push("the company website could not be read");
+        const msg = "Before you approve: " + parts.join(", and ") +
+          ".\n\nHave you checked the facts or edited the text? Press OK to approve anyway, or Cancel to go back.";
+        if (!window.confirm(msg)) return;
+      }
+      decide(i, "approve", area.value, b.brief);
+    } });
   const reject = h("button", { class: "btn reject", type: "button", disabled: decided, text: "Reject brief",
     onclick: () => decide(i, "reject", null, b.brief) });
   const kids = [
@@ -497,6 +516,10 @@ function economicsPanel(e) {
 
 async function showReport() {
   const rep = await api("/jobs/" + jobId + "/report");
+  renderReport(rep);
+}
+
+function renderReport(rep) {
   const box = $("report");
   box.innerHTML = "";
   const kids = [
@@ -522,6 +545,26 @@ async function showReport() {
 }
 
 $("jobForm").addEventListener("submit", startJob);
+
+/* ---------- a saved example report: no access code, no credits used ---------- */
+async function showExample() {
+  $("exampleError").textContent = "";
+  try {
+    const rep = await api("/example");
+    clearTimeout(timer);
+    $("emptyState").hidden = true;
+    $("briefs").innerHTML = "";
+    $("errorBox").innerHTML = "";
+    [...$("tracker").children].forEach((li) => { li.className = "done"; });
+    $("statusLine").textContent = "You are looking at a saved example from a real job. Start your own research with an access code.";
+    $("jobMeta").textContent = "";
+    $("jobMeta").append(h("span", { class: "pill completed", text: "example" }));
+    renderReport(rep);
+  } catch (err) {
+    $("exampleError").textContent = "No example has been saved yet.";
+  }
+}
+$("exampleBtn").addEventListener("click", showExample);
 
 /* ---------- animated background: a slow network of companies.
    While a job is running, signals travel along the links. ---------- */

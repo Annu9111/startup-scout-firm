@@ -1,5 +1,6 @@
 import datetime
 import hmac
+import json
 import os
 import time
 import uuid
@@ -14,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from pipeline import find_startups, check_company, scrape_site, write_brief, review_brief
 from db import save_job, load_job, list_jobs, count_jobs_on
-from business import job_economics
+from business import build_report
 
 load_dotenv()
 
@@ -231,11 +232,15 @@ def report(job_id: str):
     pending = [b for b in job["briefs"] if b["status"] == "needs_human_review"]
     if pending:
         raise HTTPException(409, f"{len(pending)} brief(s) still need human review")
-    return {
-        "customer": job["customer"],
-        "approved": [b for b in job["briefs"] if b["status"] == "approved"],
-        "rejected_count": sum(1 for b in job["briefs"] if b["status"] == "rejected"),
-        "skipped": job["skipped"],
-        "seconds_taken": job.get("seconds_taken"),
-        "economics": job_economics(job),
-    }
+    return build_report(job)
+
+
+EXAMPLE_PATH = BASE_DIR / "examples" / "example_report.json"
+
+
+@app.get("/example")
+def example():
+    """A saved report from a real job. Public: needs no access code and spends no credits."""
+    if not EXAMPLE_PATH.exists():
+        raise HTTPException(404, "No example report has been saved yet.")
+    return json.loads(EXAMPLE_PATH.read_text(encoding="utf-8"))

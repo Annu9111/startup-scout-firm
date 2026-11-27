@@ -54,3 +54,16 @@ def job_economics(job):
             "analyst_rate": ANALYST_HOURLY_RATE,
         },
     }
+
+
+def build_report(job):
+    """The customer-facing report for a finished job (no usage or internal data)."""
+    briefs = job.get("briefs") or []
+    return {
+        "customer": job["customer"],
+        "approved": [b for b in briefs if b.get("status") == "approved"],
+        "rejected_count": sum(1 for b in briefs if b.get("status") == "rejected"),
+        "skipped": job.get("skipped") or [],
+        "seconds_taken": job.get("seconds_taken"),
+        "economics": job_economics(job),
+    }
