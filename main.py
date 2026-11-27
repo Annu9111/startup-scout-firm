@@ -65,6 +65,9 @@ def process_company(c):
         domain = c["basic_info"]["primary_domain"]
         site_text = scrape_site(domain, usage)
         brief = write_brief(c, site_text, usage)
+        if not brief:
+            return {"skipped": {"name": name, "reason": "the AI service was busy, so no brief was written (run the job again)"},
+                    "usage": usage}
         review = review_brief(c, site_text, brief, usage)
         return {
             "brief": {
@@ -135,7 +138,14 @@ def run_job(job_id: str, req: JobRequest):
                     job["log"].append(f"Finished {result['brief']['name']}")
                 save_job(job)
 
-        job["status"] = "awaiting_review" if job["briefs"] else "completed"
+        if job["briefs"]:
+            job["status"] = "awaiting_review"
+        elif valid:
+            job["status"] = "failed"
+            job["error"] = ("No briefs could be written because the AI service was busy or its "
+                            "quota is used up. Please try again in a few minutes.")
+        else:
+            job["status"] = "completed"
     except Exception as e:
         job["status"] = "failed"
         job["error"] = str(e)

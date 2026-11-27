@@ -102,6 +102,12 @@ def scrape_site(domain, usage=None):
 
 
 # ---------- Stage 4: write the brief (Gemini) ----------
+def _money(amount):
+    if amount is None:
+        return "amount not listed"
+    return f"${int(round(amount)):,}"
+
+
 def _facts_text(company):
     info = company.get("basic_info") or {}
     funding = company.get("funding") or {}
@@ -111,7 +117,7 @@ def _facts_text(company):
         f"Description: {info.get('description')}\n"
         f"Team size: {(company.get('headcount') or {}).get('total')}\n"
         f"Last round: {funding.get('last_round_type')}, "
-        f"${funding.get('last_round_amount_usd')}, on {funding.get('last_fundraise_date')}\n"
+        f"{_money(funding.get('last_round_amount_usd'))}, on {funding.get('last_fundraise_date')}\n"
     )
 
 
@@ -127,7 +133,7 @@ def write_brief(company, website_text, usage=None):
         f"WEBSITE TEXT:\n{website_text or '(not available)'}"
     )
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             r = httpx.post(
                 url,
@@ -145,8 +151,8 @@ def write_brief(company, website_text, usage=None):
             print(f"   gemini status {r.status_code}, retrying...")
         except (httpx.TimeoutException, KeyError, IndexError) as e:
             print("   writer problem:", e)
-        time.sleep(5)
-    return "Brief could not be generated."
+        time.sleep(5 * (attempt + 1))
+    return None
 
 
 # ---------- Stage 5: fact-check the brief (second Gemini pass) ----------
@@ -170,7 +176,7 @@ def review_brief(company, website_text, brief, usage=None):
         f"SOURCE (website text):\n{website_text or '(not available)'}"
     )
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             r = httpx.post(
                 url,
@@ -202,5 +208,5 @@ def review_brief(company, website_text, brief, usage=None):
             print(f"   reviewer status {r.status_code}, retrying...")
         except (httpx.TimeoutException, ValueError, KeyError, IndexError) as e:
             print("   reviewer problem:", e)
-        time.sleep(5)
+        time.sleep(5 * (attempt + 1))
     return {"verdict": "not_checked", "flags": []}

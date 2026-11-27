@@ -479,7 +479,8 @@ async function decide(index, action, text, original) {
 
 function usd(n) {
   const v = Number(n) || 0;
-  return "$" + (Math.abs(v) < 1 && v !== 0 ? v.toFixed(3) : v.toFixed(2));
+  const abs = Math.abs(v);
+  return (v < 0 ? "-" : "") + "$" + (abs < 1 && abs !== 0 ? abs.toFixed(3) : abs.toFixed(2));
 }
 function duration(totalSeconds) {
   const s = Math.round(Number(totalSeconds) || 0);
