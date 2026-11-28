@@ -11,6 +11,11 @@ CRUSTDATA_KEY = os.getenv("CRUSTDATA_API_KEY")
 OLOSTEP_KEY = os.getenv("OLOSTEP_API_KEY")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# A second model with its own quota. Used automatically when the main model refuses.
+GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite")
+
+# The most recent Gemini problem, so the page can show the real reason.
+LAST_ERROR = {"text": ""}
 
 
 def _add_usage(usage, data):
@@ -25,6 +30,44 @@ def _add_usage(usage, data):
         + (meta.get("candidatesTokenCount") or 0)
         + (meta.get("thoughtsTokenCount") or 0)
     )
+
+
+def _gemini(prompt, usage=None, json_mode=False):
+    """Ask Gemini and return the answer text, or None if every attempt failed.
+
+    Attempts alternate between the main model and the fallback model, because
+    each model has its own free-tier quota.
+    """
+    for attempt in range(4):
+        model = GEMINI_MODEL if attempt % 2 == 0 else GEMINI_FALLBACK_MODEL
+        config = {}
+        if json_mode:
+            config["responseMimeType"] = "application/json"
+        if model == GEMINI_MODEL:
+            config["thinkingConfig"] = {"thinkingBudget": 0}
+        body = {"contents": [{"parts": [{"text": prompt}]}]}
+        if config:
+            body["generationConfig"] = config
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        try:
+            r = httpx.post(
+                url,
+                headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
+                json=body,
+                timeout=120,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                _add_usage(usage, data)
+                return text.strip()
+            LAST_ERROR["text"] = f"{model} answered {r.status_code}: {r.text[:200]}"
+            print(f"   gemini {model} status {r.status_code}: {r.text[:200]}")
+        except (httpx.HTTPError, KeyError, IndexError, ValueError) as e:
+            LAST_ERROR["text"] = f"{model} problem: {type(e).__name__} {e}"
+            print(f"   gemini {model} problem: {type(e).__name__} {e}")
+        time.sleep(3 * (attempt + 1))
+    return None
 
 
 # ---------- Stage 1: find startups (Crustdata) ----------
@@ -128,31 +171,13 @@ def write_brief(company, website_text, usage=None):
         "its stage, and one notable detail. Use ONLY the facts and website text "
         "below. If something is unknown, say so. Do not invent details. Use plain "
         "factual language and avoid marketing words such as innovative, leading or "
-        "world-class.\n\n"
+        "world-class. Never convert currencies and never mention exchange rates: "
+        "state every amount exactly as written in the source. If the website and the "
+        "company record disagree about an amount, say that they differ.\n\n"
         f"FACTS:\n{_facts_text(company)}\n"
         f"WEBSITE TEXT:\n{website_text or '(not available)'}"
     )
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    for attempt in range(4):
-        try:
-            r = httpx.post(
-                url,
-                headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"thinkingConfig": {"thinkingBudget": 0}},
-                },
-                timeout=120,
-            )
-            if r.status_code == 200:
-                data = r.json()
-                _add_usage(usage, data)
-                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            print(f"   gemini status {r.status_code}, retrying...")
-        except (httpx.TimeoutException, KeyError, IndexError) as e:
-            print("   writer problem:", e)
-        time.sleep(5 * (attempt + 1))
-    return None
+    return _gemini(prompt, usage)  # None if Gemini could not answer
 
 
 # ---------- Stage 5: fact-check the brief (second Gemini pass) ----------
@@ -175,38 +200,21 @@ def review_brief(company, website_text, brief, usage=None):
         f"SOURCE (company record):\n{_facts_text(company)}\n"
         f"SOURCE (website text):\n{website_text or '(not available)'}"
     )
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    for attempt in range(4):
-        try:
-            r = httpx.post(
-                url,
-                headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "responseMimeType": "application/json",
-                        "thinkingConfig": {"thinkingBudget": 0},
-                    },
-                },
-                timeout=120,
-            )
-            if r.status_code == 200:
-                resp = r.json()
-                _add_usage(usage, resp)
-                raw = resp["candidates"][0]["content"]["parts"][0]["text"]
-                data = json.loads(raw)
-                if not isinstance(data, dict):
-                    raise ValueError("reviewer did not return an object")
-                flags = []
-                for f in (data.get("flags") or [])[:4]:
-                    if isinstance(f, dict) and f.get("claim"):
-                        flags.append({
-                            "claim": str(f["claim"])[:200],
-                            "reason": str(f.get("reason", ""))[:240],
-                        })
-                return {"verdict": "needs_check" if flags else "ok", "flags": flags}
-            print(f"   reviewer status {r.status_code}, retrying...")
-        except (httpx.TimeoutException, ValueError, KeyError, IndexError) as e:
-            print("   reviewer problem:", e)
-        time.sleep(5 * (attempt + 1))
-    return {"verdict": "not_checked", "flags": []}
+    raw = _gemini(prompt, usage, json_mode=True)
+    if raw is None:
+        return {"verdict": "not_checked", "flags": []}
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("reviewer did not return an object")
+    except ValueError as e:
+        print("   reviewer problem:", e)
+        return {"verdict": "not_checked", "flags": []}
+    flags = []
+    for f in (data.get("flags") or [])[:4]:
+        if isinstance(f, dict) and f.get("claim"):
+            flags.append({
+                "claim": str(f["claim"])[:200],
+                "reason": str(f.get("reason", ""))[:240],
+            })
+    return {"verdict": "needs_check" if flags else "ok", "flags": flags}

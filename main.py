@@ -13,6 +13,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+import pipeline
 from pipeline import find_startups, check_company, scrape_site, write_brief, review_brief
 from db import save_job, load_job, list_jobs, count_jobs_on
 from business import build_report
@@ -22,7 +23,7 @@ load_dotenv()
 app = FastAPI(title="Startup Scout Firm")
 
 BASE_DIR = Path(__file__).parent
-MAX_PARALLEL = 3          # companies researched at the same time
+MAX_PARALLEL = int(os.getenv("MAX_PARALLEL", "2"))   # companies researched at the same time
 CANDIDATE_FACTOR = 3      # fetch this many times more candidates than requested
 
 # Protection for the public link. Set both in .env locally and in Render's environment.
@@ -66,7 +67,8 @@ def process_company(c):
         site_text = scrape_site(domain, usage)
         brief = write_brief(c, site_text, usage)
         if not brief:
-            return {"skipped": {"name": name, "reason": "the AI service was busy, so no brief was written (run the job again)"},
+            detail = pipeline.LAST_ERROR["text"][:160]
+            return {"skipped": {"name": name, "reason": "no brief was written, the AI service did not answer (" + detail + ")"},
                     "usage": usage}
         review = review_brief(c, site_text, brief, usage)
         return {
